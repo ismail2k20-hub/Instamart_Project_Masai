@@ -192,6 +192,12 @@ The completed-order correlation matrix covers order amount, discount percentage,
 
 Completed-order amounts are strongly right-skewed: the mean of INR 269.91 is substantially higher than the median of INR 135.00, and skewness is approximately 4.61. The upper 1.5 × IQR fence is INR 645.30, with 897 observations above it and none below the lower fence. Bengaluru has completed revenue of INR 523,643.40 across 1,894 orders, while Mumbai has INR 479,058.50 across 1,613 orders. The city/category pivot table agrees with the SQL revenue total of INR 2,998,668.80. The largest absolute correlation is between order amount and discount percentage at approximately -0.095; this relationship is weak, and correlation does not demonstrate causation.
 
+### Limitations and human review
+
+The project uses deterministic synthetic data, so its results may not represent real customer behaviour or real operational conditions. Model performance on synthetic data does not guarantee generalisation to real customers. Policy-based decisions may require human review when rules are ambiguous or cases fall outside known scenarios. The refund agent is simulated and does not integrate with a real payment system.
+
+Future work should evaluate models on representative real-world data where legally permitted, monitor data quality and model drift, strengthen logging and access controls, test recovery behaviour, and include human oversight for high-impact or ambiguous decisions.
+
 ## Part B — Customer Segments and Lapse Prediction
 
 ### 1. RFM Table
@@ -369,6 +375,9 @@ The top 10 Premium customers in the test set were ranked by predicted lapse prob
 
 The retention list is illustrative and not a leakage-free evaluation because the Premium flag comes from whole-window RFM, including September orders that also define the lapse label. The model's predictor features themselves use only orders dated before `2025-09-01`.
 
+### Limitations and human review
+
+The Premium flag is a post-hoc whole-window label based on RFM that includes September orders, which also define the lapse label. Therefore, the retention list is illustrative and not a leakage-free evaluation. The lapse model's features use only orders dated before 2025-09-01, and the segment labels are not used as model features.
 
 ## Part C — Support Ticket Triage
 
@@ -425,10 +434,7 @@ Required outputs:
 - `outputs/refund_ledger.jsonl`
 - `state/`
 
-# Limitations and Next Steps
 
-The project uses deterministic synthetic data, so its results may not represent real customer behaviour or real operational conditions. Model performance on synthetic data does not guarantee generalisation to real customers. Policy-based decisions may require human review when rules are ambiguous or cases fall outside known scenarios. The refund agent is simulated and does not integrate with a real payment system.
 
-Future work should evaluate models on representative real-world data where legally permitted, monitor data quality and model drift, strengthen logging and access controls, test recovery behaviour, and include human oversight for high-impact or ambiguous decisions.
 
-The Premium flag is a post-hoc whole-window label based on RFM that includes September orders, which also define the lapse label. Therefore, the retention list is illustrative and not a leakage-free evaluation. The lapse model's features use only orders dated before 2025-09-01, and the segment labels are not used as model features.
+

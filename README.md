@@ -370,14 +370,44 @@ The top 10 Premium customers in the test set were ranked by predicted lapse prob
 The retention list is illustrative and not a leakage-free evaluation because the Premium flag comes from whole-window RFM, including September orders that also define the lapse label. The model's predictor features themselves use only orders dated before `2025-09-01`.
 
 
-# Part C
+## Part C — Support Ticket Triage
 
-Complete this section after implementing and running the Part C scripts. Report the ticket-triage methodology, classification results, budget assumptions and budget-constrained prioritisation findings. Include the required metrics and numerical results.
+### Pipeline
 
-Required outputs:
+The ticket triage pipeline processes the 164 raw support tickets in file order using the supplied, unmodified `mock_llm.py`. Before making model calls, it skips empty tickets and flags tickets whose estimated length exceeds 400 tokens. It redacts email addresses, phone numbers, and order IDs using the required regular expressions and placeholders before sending ticket text to the model. Transient model errors are retried with exponential backoff and jitter, with a maximum of three retries.
 
-- `outputs/triage_results.csv`
-- `outputs/triage_budget_demo.csv`
+Two prompts were evaluated: zero-shot classification and few-shot classification. Model replies are parsed as JSON first. If JSON parsing fails, the pipeline accepts a category only when exactly one allowed category appears in the reply; otherwise, it flags the output for human review instead of guessing.
+
+### Results
+
+| Metric | Zero-shot | Few-shot |
+|---|---:|---:|
+| Classified tickets | 147 | 147 |
+| Accuracy on classified tickets | 85.71% | 100.00% |
+| Total response tokens | 13,144 | 27,340 |
+| Tokens per classified ticket | 89.42 | 185.99 |
+
+The few-shot prompt improved accuracy by 14.29 percentage points, from 85.71% to 100%, on the 147 classified tickets. It used 14,196 additional response tokens, increasing token usage per classified ticket from 89.42 to 185.99. Few-shot classification may therefore be worthwhile when classification accuracy is more important than token cost, while zero-shot classification is more economical when the lower accuracy is acceptable.
+
+### Output validation and routing
+
+The final few-shot run produced `outputs/triage_results.csv` with 164 rows. Its status counts were:
+
+- `classified_json`: 135
+- `classified_keyword`: 12
+- `flagged_invalid_output`: 9
+- `skipped_empty`: 4
+- `flagged_long`: 4
+
+Tickets with invalid output, empty text, or excessive length are routed to `human_review` with `NORMAL` priority. Valid fraud classifications are routed to `security_team` with `HIGH` priority. Other valid classifications go to `premium_desk` with `HIGH` priority when the customer is marked premium in the Part B customer segments; otherwise, they go to `support_queue` with `NORMAL` priority.
+
+### Token budget demonstration
+
+The zero-shot budget demonstration used a token budget of 6,000 and produced `outputs/triage_budget_demo.csv` with 164 rows. **84 tickets** were marked `budget_exhausted`. Budget-exhausted tickets are not sent for additional model calls and are routed to human review with `NORMAL` priority.
+
+### Limitations and human review
+
+The classifier is a deterministic offline simulation, not a live hosted LLM. Its results reflect the supplied mock model's keyword rules and simulated response behavior, so the measured accuracy should not be treated as evidence of production performance. The 9 invalid outputs, 4 empty tickets, and 4 overlong tickets are not automatically classified in the final run and require human review. Redaction is limited to the specified email, phone, and order-ID patterns and does not guarantee removal of every possible form of personally identifiable information.
 
 # Part D
 

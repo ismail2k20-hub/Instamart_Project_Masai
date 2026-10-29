@@ -420,19 +420,81 @@ The classifier is a deterministic offline simulation, not a live hosted LLM. Its
 
 # Part D
 
-Complete this section after implementing and running the Part D scripts.
+### Task 1 — Chunking
 
-Include:
-- A table showing all seven scenarios, expected outcomes, actual outcomes, statuses and refund amounts.
-- The status and result of each of the two stop-safely demonstrations.
-- The tools executed during the crash-and-resume run, in execution order.
-- An explanation of how persistent state prevented unsafe duplicate actions.
+The 5 policy files produce 15 chunks with 40-word chunks and 10-word overlap:
 
-Required outputs:
+| Policy file | Chunks |
+|---|---:|
+| `refund_policy.txt` | 4 |
+| `delivery_policy.txt` | 3 |
+| `escalation_policy.txt` | 3 |
+| `payment_policy.txt` | 3 |
+| `privacy_policy.txt` | 2 |
+| **Total** | **15** |
 
-- `outputs/agent_runs.jsonl`
-- `outputs/refund_ledger.jsonl`
-- `state/`
+### Task 2 — Retrieval and TF-IDF
+
+For `refund policy late delivery`, the top 3 results all come from `refund_policy.txt`. The measured cosine scores in this run were 0.2719, 0.2514 and 0.2454. Term Frequency (TF) measures how often a term occurs in a document/chunk; Inverse Document Frequency (IDF) gives less weight to terms common across many documents and more weight to distinctive terms. TF-IDF can miss semantic matches when two phrasings use different words, because it relies on lexical overlap rather than meaning.
+
+### Task 3 — Grounded answer
+
+`answer(question)` sends a `POLICY ASSISTANT` system message and a user message in the required `CONTEXT:` / `QUESTION:` format. It returns the mock model's answer and the three retrieved source chunks. If context does not contain an answer, the mock model returns `I could not find that information in the policy documents.`
+
+### Task 4 — Retrieval and grounding evaluation
+
+| Chunk overlap | Total chunks | Expected document in top 3 | Expected fact substring | Unanswerable fallback |
+|---|---:|---:|---:|---:|
+| 10 words | 15 | 12/12 | 12/12 | 2/2 |
+| 0 words | 13 | 12/12 | 10/12 | 2/2 |
+
+With zero overlap, the question **“What delivery time makes a completed order eligible for a full refund?”** fails the expected-fact check: the answer fragment `receives a full refund of the order amount.` no longer contains the required phrase `more than 45 minutes`, which falls across a chunk boundary. A second zero-overlap failure is **“How soon is money returned when a payment fails but is deducted?”**; its retrieved context is split around the sentence boundary and the answer is contaminated by an unrelated refund-policy fragment. Document retrieval still hits 12/12 because the correct document can rank even when the exact fact is not preserved in a single useful chunk.
+
+### Tasks 5–6 — Tools and ReAct scenario results
+
+Refund rules: only `completed` orders qualify; delivery above 45 minutes yields a full refund; 45 minutes or less yields INR 0; refunds above INR 1,000 are escalated rather than issued automatically. All simulated requests are treated as being inside the 7-day policy window.
+
+| Scenario | Status | Refund amount (INR) | Model calls | Estimated tokens used |
+|---|---|---:|---:|---:|
+| S1 | `REFUND` | 128.25 | 5 | 1,207 |
+| S2 | `REFUND` | 135.00 | 5 | 1,207 |
+| S3 | `ESCALATE` | 1,999.00 | 5 | 1,194 |
+| S4 | `DENIED` | 0.00 | 4 | 853 |
+| S5 | `DENIED` | 0.00 | 3 | 523 |
+| S6 | `NOT_FOUND` | 0.00 | 2 | 196 |
+| S7 | `FALLBACK_MAX_ITERATIONS` | 0.00 | 6 | 3,372 |
+
+All 7 scenario statuses and refund amounts match the expected outcomes. The token figures are `mock_llm.py` estimates, not measurements from a hosted model. `TOOLS_SPEC` describes the 5 tools and `TOOL_MAP` dispatches tool names to Python functions. Each run is appended to `outputs/agent_runs.jsonl`, including tool arguments and observations.
+
+### Task 7 — Safety limits
+
+| Demonstration | Configuration | Result status | Model calls | Tokens used |
+|---|---|---|---:|---:|
+| S1 token-limit demo | `token_limit=200` | `FALLBACK_TOKEN_LIMIT` | 2 | 226 |
+| S1 timeout demo | `time_limit_seconds=0` | `FALLBACK_TIMEOUT` | 0 | 0 |
+| S7 default run | `max_iterations=6`, `token_limit=6000` | `FALLBACK_MAX_ITERATIONS` | 6 | 3,372 |
+
+Token usage is added after each model call. If the accumulated total exceeds the limit, the requested tool is not executed. Timeout is checked with `time.monotonic()` at the top of the loop; a zero-second limit therefore stops before the first model call. S7 reaches the iteration limit and does not exceed the default 6,000-token budget.
+
+### Task 8 — Crash and resume
+
+The S1 demo deliberately raises a simulated crash immediately after the second tool observation is appended and checkpointed. `resume_agent("S1_crash_resume_demo")` continues from the saved messages and state. The ordered tool executions across both parts are exactly:
+
+`get_order` → `search_policy` → `calculate_refund` → `issue_refund`
+
+There are 4 tool executions total, with no repeated tool execution. Final status: `REFUND`; final answer: `REFUND: INR 128.25 issued.` Checkpoints are stored under `state/`.
+
+### Task 9 — ReAct versus plan-and-execute (under 250 words)
+
+ReAct calls the model after each observation, so it can adjust its next action to the returned order status or tool result. In this run S1 used 5 model calls and about 1,207 estimated tokens; S5 used 3 calls and 523 tokens; S6 used 2 calls and 196 tokens. S7 used all 6 permitted calls and about 3,372 tokens before the iteration-limit fallback. A plan-and-execute design would typically ask for the full tool sequence once, then execute it and call the model again only if a tool fails or the observation invalidates the plan. That can reduce calls and tokens on predictable cases, although the exact savings have not been benchmarked here. Its risk is following a stale plan after an unexpected observation: for example, `NOT_FOUND`, a cancelled order, or a changed order status should stop a refund rather than continue to issue one. ReAct is a better default for this refund workflow because it checks each observation before choosing the next action and makes policy guardrails easier to enforce. A constrained plan-and-execute variant could be more efficient if every tool result is validated and any mismatch triggers replanning or human handoff.
+
+## Limitations and Next Steps
+
+- TF-IDF is lexical retrieval, not semantic retrieval; zero-overlap evaluation shows that sentence facts can be split across chunk boundaries.
+- `mock_llm.py` is a deterministic offline simulator; its answers and token estimates do not represent a production model's quality or billing.
+- Refund actions are simulated JSONL records only. No real payment or external service is contacted.
+- Part B and Part C metric outputs were not included in the files used to prepare this README. Add their actual measured metrics from your completed runs before final submission rather than reporting invented values.
+- Next steps: add unit tests for refund edge cases (exactly 45 minutes and exactly INR 1,000), validate the SQLite schema, test malformed tool arguments, and consider semantic embeddings plus a production-grade audit trail.
 
 
 

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Overview
 
 This project builds a customer intelligence and support automation pipeline using deterministic synthetic Instamart data.
@@ -500,3 +501,6 @@ ReAct calls the model after each observation, so it can adjust its next action t
 
 
 
+=======
+# Instamart_Project_Masai
+>>>>>>> 5806b44a3514560d590f61e7db7d18f4ab3d5a43
